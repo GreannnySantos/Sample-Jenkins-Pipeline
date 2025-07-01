@@ -1,76 +1,85 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        AWS_REGION = 'us-east-1'
-        APP_NAME = 'sample-app'
+  environment {
+    AWS_DEFAULT_REGION = 'us-east-1'
+    TF_VAR_env = 'dev'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
 
-    options {
-        timestamps()
-        disableConcurrentBuilds()
+    stage('Terraform Init') {
+      steps {
+        sh 'terraform init'
+      }
     }
 
-    stages {
-        stage('Checkout Code') {
-            steps {
-                echo 'Cloning repository...'
-                checkout scm
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                echo 'Installing dependencies...'
-                sh 'npm install' // Change if you're not using Node
-            }
-        }
-
-        stage('Static Code Analysis') {
-            steps {
-                echo 'Running static code analysis...'
-                sh './scripts/run-scan.sh || true' // Optional scan stage
-            }
-        }
-
-        stage('Build') {
-            steps {
-                echo 'Building the application...'
-                sh 'npm run build' // Replace with your build tool (e.g., Maven, Docker, etc.)
-            }
-        }
-
-        stage('Deploy to Dev') {
-            when {
-                branch 'develop'
-            }
-            steps {
-                echo "Deploying ${APP_NAME} to Dev..."
-                sh './scripts/deploy.sh dev'
-            }
-        }
-
-        stage('Deploy to Prod') {
-            when {
-                branch 'main'
-            }
-            steps {
-                input message: "Approve deployment to production?"
-                echo "Deploying ${APP_NAME} to Prod..."
-                sh './scripts/deploy.sh prod'
-            }
-        }
+    stage('Validate IAM Config') {
+      steps {
+        sh 'terraform validate -target=aws_iam_role.ecsTaskExecutionRole'
+      }
     }
 
-    post {
-        success {
-            echo 'Pipeline completed successfully.'
-        }
-        failure {
-            echo 'Pipeline failed. Please check logs.'
-        }
-        always {
-            cleanWs()
-        }
+    stage('Validate Security Group') {
+      steps {
+        sh 'terraform validate -target=aws_security_group.ecs_sg'
+      }
     }
+
+    stage('Validate EC2 Instance') {
+      steps {
+        sh 'terraform validate -target=aws_instance.my_ec2'
+      }
+    }
+
+    stage('Plan IAM') {
+      steps {
+        sh 'terraform plan -target=aws_iam_role.ecsTaskExecutionRole -out=tfplan-iam'
+      }
+    }
+
+    stage('Plan Security Group') {
+      steps {
+        sh 'terraform plan -target=aws_security_group.ecs_sg -out=tfplan-sg'
+      }
+    }
+
+    stage('Plan EC2') {
+      steps {
+        sh 'terraform plan -target=aws_instance.my_ec2 -out=tfplan-ec2'
+      }
+    }
+
+    stage('Apply IAM') {
+      steps {
+        sh 'terraform apply -auto-approve tfplan-iam'
+      }
+    }
+
+    stage('Apply Security Group') {
+      steps {
+        sh 'terraform apply -auto-approve tfplan-sg'
+      }
+    }
+
+    stage('Apply EC2') {
+      steps {
+        sh 'terraform apply -auto-approve tfplan-ec2'
+      }
+    }
+  }
+
+  post {
+    failure {
+      echo 'Terraform pipeline failed.'
+    }
+    success {
+      echo 'All Terraform resources applied successfully.'
+    }
+  }
 }
